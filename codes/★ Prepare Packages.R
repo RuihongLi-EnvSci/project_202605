@@ -1,3 +1,5 @@
+# This code requires R version 4.5.0 to run.Several packages and functions cannot run in the latest version.
+
 options(timeout = 9999)
 
 pre.packages <- c(
