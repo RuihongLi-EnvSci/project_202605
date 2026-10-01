@@ -15,10 +15,6 @@ if (!requireNamespace("piecewiseSEM", quietly = TRUE)) install.packages("piecewi
 if (!requireNamespace("boot", quietly = TRUE)) install.packages("boot")
 if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
 
-library(piecewiseSEM)
-library(boot)
-library(openxlsx)
-
 fit_model_1 <- function(dat) {
   piecewiseSEM::psem(
     lm(benthic_invertebrate_richness ~ fish_richness, dat),
