@@ -12,6 +12,7 @@ pre.packages <- c(
   "agricolae",
   "betapart",
   "bipartite",
+  "boot",
   "car",
   "codyn",
   "dplyr",
