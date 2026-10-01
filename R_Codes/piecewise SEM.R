@@ -11,16 +11,13 @@ if (requireNamespace("utils", quietly = TRUE)) {
   try(utils::assignInNamespace("print.console", NULL, ns = "utils"), silent = TRUE)
 }
 
-if (!requireNamespace("piecewiseSEM", quietly = TRUE)) {
-  install.packages("piecewiseSEM")
-}
-
-if (!requireNamespace("boot", quietly = TRUE)) {
-  install.packages("boot")
-}
+if (!requireNamespace("piecewiseSEM", quietly = TRUE)) install.packages("piecewiseSEM")
+if (!requireNamespace("boot", quietly = TRUE)) install.packages("boot")
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
 
 library(piecewiseSEM)
 library(boot)
+library(openxlsx)
 
 fit_model_1 <- function(dat) {
   piecewiseSEM::psem(
@@ -347,6 +344,66 @@ psem_bootstrap_analysis <- function(label, fit_fun, dat, R = 1000, seed = 123) {
   invisible(list(model = model, boot = boot_res, summary = boot_summary))
 }
 
+export_psem_results <- function(res_list, labels, out_file) {
+  wb <- createWorkbook()
+  hdr_names <- c("Coefficients", "Individual R-squared",
+                 "Global goodness-of-fit", "Tests of directed separation")
+  for (i in seq_along(res_list)) {
+    res <- res_list[[i]]
+    label <- labels[i]
+    sm <- summary(res$model)
+    lines <- capture.output(print(sm))
+    
+    hdr_idx <- sapply(hdr_names, function(h) {
+      idx <- grep(paste0("^", h, ":?"), lines)
+      if (length(idx) == 0) NA_integer_ else idx[1]
+    })
+    
+    get_lines <- function(h) {
+      i_start <- hdr_idx[h]
+      if (is.na(i_start)) return(character(0))
+      nexts <- hdr_idx[!is.na(hdr_idx) & hdr_idx > i_start]
+      i_end <- if (length(nexts) > 0) min(nexts) - 1 else length(lines)
+      txt <- lines[(i_start + 1):i_end]
+      while (length(txt) > 0 && !nzchar(trimws(txt[1]))) txt <- txt[-1]
+      while (length(txt) > 0 && !nzchar(trimws(txt[length(txt)]))) txt <- txt[-length(txt)]
+      txt
+    }
+    
+    sh <- paste0(label, " psem")
+    addWorksheet(wb, sh)
+    row <- 1
+    
+    writeData(wb, sh, "Coefficients:", startRow = row, colNames = FALSE)
+    row <- row + 1
+    coef_df <- as.data.frame(sm$coefficients)
+    rownames(coef_df) <- NULL
+    writeData(wb, sh, coef_df, startRow = row, colNames = TRUE)
+    row <- row + nrow(coef_df) + 2
+    
+    for (h in hdr_names[-1]) {
+      writeData(wb, sh, paste0(h, ":"), startRow = row, colNames = FALSE)
+      row <- row + 1
+      txt <- get_lines(h)
+      if (length(txt) == 0) {
+        writeData(wb, sh, "(empty)", startRow = row, colNames = FALSE)
+        row <- row + 2
+      } else {
+        for (ln in txt) {
+          writeData(wb, sh, ln, startRow = row, colNames = FALSE)
+          row <- row + 1
+        }
+        row <- row + 1
+      }
+    }
+    
+    sh2 <- paste0(label, " bootstrap")
+    addWorksheet(wb, sh2)
+    writeData(wb, sh2, res$summary, rowNames = FALSE)
+  }
+  saveWorkbook(wb, out_file, overwrite = TRUE)
+}
+
 R_boot <- 1000
 res_1 <- psem_bootstrap_analysis("Model 1", fit_model_1, data_average, R = R_boot)
 res_2 <- psem_bootstrap_analysis("Model 2", fit_model_2, data_average, R = R_boot)
@@ -354,3 +411,9 @@ res_3 <- psem_bootstrap_analysis("Model 3", fit_model_3, data_average, R = R_boo
 res_4 <- psem_bootstrap_analysis("Model 4", fit_model_4, data_average, R = R_boot)
 res_5 <- psem_bootstrap_analysis("Model 5", fit_model_5, data_original, R = R_boot)
 res_6 <- psem_bootstrap_analysis("Model 6", fit_model_6, data_original, R = R_boot)
+
+export_psem_results(
+  list(res_1, res_2, res_3, res_4, res_5, res_6),
+  c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6"),
+  "Result_Tables/pSEM Results.xlsx"
+)
