@@ -1,5 +1,10 @@
 rm(list = ls())
 
+library(lmerTest)
+library(car)
+library(performance)
+library(openxlsx)
+
 load("R_Datasets/metrics.rdata")
 
 run_lmer_models <- function(response_vars, data) {
@@ -23,6 +28,11 @@ run_lmer_models <- function(response_vars, data) {
     print(model_summary)
     
     fixed_effects <- as.data.frame(model_summary$coefficients)
+    if ("Pr(>|t|)" %in% colnames(fixed_effects)) {
+      fixed_effects$p.value <- fixed_effects[["Pr(>|t|)"]]
+    } else {
+      fixed_effects$p.value <- NA_real_
+    }
     fixed_effects$Variable <- rownames(fixed_effects)
     fixed_effects$Response <- resp
     rownames(fixed_effects) <- NULL
@@ -39,6 +49,11 @@ run_lmer_models <- function(response_vars, data) {
       VIF = as.numeric(vif_values),
       Response = resp,
       row.names = NULL
+    )
+    max_vif <- max(vif_values, na.rm = TRUE)
+    vif_df <- rbind(
+      vif_df,
+      data.frame(Variable = "MAX_VIF", VIF = max_vif, Response = resp)
     )
     
     cat("\n--- r² value ---\n")
@@ -105,6 +120,7 @@ for (resp in response_variables) {
     Estimate = fixed_effects[["Estimate"]],
     Std.Error = fixed_effects[["Std. Error"]],
     t.value = fixed_effects[["t value"]],
+    p.value = fixed_effects[["p.value"]],
     Extra = NA_character_,
     stringsAsFactors = FALSE
   )
@@ -115,6 +131,7 @@ for (resp in response_variables) {
     Estimate = random_effects$vcov,
     Std.Error = random_effects$sdcor,
     t.value = NA_real_,
+    p.value = NA_real_,
     Extra = paste(random_effects$var1, random_effects$var2),
     stringsAsFactors = FALSE
   )
@@ -125,6 +142,7 @@ for (resp in response_variables) {
     Estimate = vif_df$VIF,
     Std.Error = NA_real_,
     t.value = NA_real_,
+    p.value = NA_real_,
     Extra = NA_character_,
     stringsAsFactors = FALSE
   )
@@ -135,6 +153,7 @@ for (resp in response_variables) {
     Estimate = r2_df$R2_Value,
     Std.Error = NA_real_,
     t.value = NA_real_,
+    p.value = NA_real_,
     Extra = NA_character_,
     stringsAsFactors = FALSE
   )
