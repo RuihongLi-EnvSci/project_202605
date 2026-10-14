@@ -2,6 +2,9 @@
 
 rm(list = ls())
 
+library(openxlsx)
+library(agricolae)
+
 load("R_Datasets/metrics.rdata")
 
 data_processed <- data_original %>%
@@ -61,6 +64,8 @@ y_params <- list(
   robustness = list(limits = c(0, 0.35)),
   vulnerability = list(limits = c(10, 75))
 )
+
+foodweb_sheet_rows <- list()
 
 for (current_index in levels(data_long$index)) {
   index_data <- data_long %>%
@@ -210,11 +215,41 @@ for (current_index in levels(data_long$index)) {
   cat(anova_text, "\n\n")
   cat("Tukey HSD Result", "\n\n")
   print(tukey_groups)
+  
+  tukey_years_all <- rownames(tukey_groups)
+  tukey_letters_all <- as.character(tukey_groups$groups)
+  valid_t <- !is.na(tukey_letters_all)
+  tukey_years <- tukey_years_all[valid_t]
+  tukey_letters <- tukey_letters_all[valid_t]
+  
+  entry <- data.frame(
+    A = c(index_names[current_index], "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", tukey_years, ""),
+    B = c("", "", "", "", "", "", "groups", tukey_letters, ""),
+    stringsAsFactors = FALSE
+  )
+  foodweb_sheet_rows[[current_index]] <- entry
 }
+
+if (length(foodweb_sheet_rows) > 0) {
+  foodweb_sheet <- do.call(rbind, foodweb_sheet_rows)
+  rownames(foodweb_sheet) <- NULL
+} else {
+  foodweb_sheet <- data.frame(A = character(), B = character(), stringsAsFactors = FALSE)
+}
+
+write.xlsx(
+  list("foodweb metrics" = foodweb_sheet),
+  "Result_Tables/ANOVA_TukeyHSD Results.xlsx",
+  overwrite = TRUE,
+  colNames = FALSE
+)
 
 ### Scatter Plot
 
 rm(list = ls())
+
+library(openxlsx)
+library(agricolae)
 
 load("R_Datasets/metrics.rdata")
 
@@ -466,10 +501,10 @@ plot_point_style <- function(data_long,
   
   species_label <- gsub(suffix_to_remove, "", as.character(current_species))
   
+  entry_df <- NULL
+  
   if (n_years_present >= 2) {
-    anova_ok <- FALSE
-    
-    try({
+    result <- try({
       lm_model <- lm(value ~ year, data = species_data)
       anova_res <- anova(lm_model)
       
@@ -491,15 +526,15 @@ plot_point_style <- function(data_long,
       
       anova_text <- paste(f_value_text, "", p_label)
       
-      lsd_res <- agricolae::LSD.test(
-        y = lm_model,
-        trt = "year",
-        alpha = 0.05,
+      anova_model <- aov(value ~ year, data = species_data)
+      tukey_res <- agricolae::HSD.test(
+        anova_model,
+        "year",
         group = TRUE,
         console = FALSE
       )
       
-      letter_df <- lsd_res$groups
+      letter_df <- tukey_res$groups
       letter_df$year <- rownames(letter_df)
       rownames(letter_df) <- NULL
       
@@ -510,21 +545,37 @@ plot_point_style <- function(data_long,
       cat("\n", species_label)
       cat("\n\n", "ANOVA Result", "\n")
       cat(anova_text, "\n\n")
-      cat("LSD Result", "\n\n")
+      cat("Tukey HSD Result", "\n\n")
       print(letter_df[, c("year", "groups")])
       
-      anova_ok <- TRUE
+      data.frame(
+        A = c(species_label, "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", as.character(letter_df$year), ""),
+        B = c("", "", "", "", "", "", "groups", as.character(letter_df$groups), ""),
+        stringsAsFactors = FALSE
+      )
     }, silent = TRUE)
     
-    if (!anova_ok) {
+    if (inherits(result, "try-error")) {
       cat("\n", species_label)
       cat("\n\n", "ANOVA Result", "\n")
       cat("ANOVA unavailable for:", species_label, "\n")
+      entry_df <- data.frame(
+        A = c(species_label, "", "ANOVA Result", paste("ANOVA unavailable for:", species_label)),
+        B = c("", "", "", ""),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      entry_df <- result
     }
   } else {
     cat("\n", species_label)
     cat("\n\n", "ANOVA Result", "\n")
     cat("Insufficient years for ANOVA\n")
+    entry_df <- data.frame(
+      A = c(species_label, "", "ANOVA Result", "Insufficient years for ANOVA"),
+      B = c("", "", "", ""),
+      stringsAsFactors = FALSE
+    )
   }
   
   p <- ggplot(species_data, aes(x = year, y = value, color = year)) +
@@ -581,11 +632,14 @@ plot_point_style <- function(data_long,
     height = 5.5,
     dpi = 600
   )
+  
+  return(entry_df)
 }
 
+richness_sheet_rows <- list()
 species_list_richness <- levels(data_richness_long$species)
 for (current_species in species_list_richness) {
-  plot_point_style(
+  entry <- plot_point_style(
     data_long = data_richness_long,
     current_species = current_species,
     y_breaks_list = richness_breaks_list,
@@ -594,11 +648,22 @@ for (current_species in species_list_richness) {
     file_prefix = "richness_",
     suffix_to_remove = "_richness"
   )
+  if (!is.null(entry)) {
+    richness_sheet_rows[[current_species]] <- entry
+  }
 }
 
+if (length(richness_sheet_rows) > 0) {
+  richness_sheet <- do.call(rbind, richness_sheet_rows)
+  rownames(richness_sheet) <- NULL
+} else {
+  richness_sheet <- data.frame(A = character(), B = character(), stringsAsFactors = FALSE)
+}
+
+diversity_sheet_rows <- list()
 species_list_diversity <- levels(data_diversity_long$species)
 for (current_species in species_list_diversity) {
-  plot_point_style(
+  entry <- plot_point_style(
     data_long = data_diversity_long,
     current_species = current_species,
     y_breaks_list = diversity_breaks_list,
@@ -607,4 +672,36 @@ for (current_species in species_list_diversity) {
     file_prefix = "diversity_",
     suffix_to_remove = "_diversity"
   )
+  if (!is.null(entry)) {
+    diversity_sheet_rows[[current_species]] <- entry
+  }
 }
+
+if (length(diversity_sheet_rows) > 0) {
+  diversity_sheet <- do.call(rbind, diversity_sheet_rows)
+  rownames(diversity_sheet) <- NULL
+} else {
+  diversity_sheet <- data.frame(A = character(), B = character(), stringsAsFactors = FALSE)
+}
+
+foodweb_sheet <- read.xlsx(
+  xlsx_path,
+  sheet = "foodweb metrics",
+  colNames = FALSE
+)
+if (ncol(foodweb_sheet) >= 2) {
+  foodweb_sheet <- foodweb_sheet[, 1:2]
+  names(foodweb_sheet) <- c("A", "B")
+} else if (ncol(foodweb_sheet) == 1) {
+  foodweb_sheet$B <- NA_character_
+  names(foodweb_sheet) <- c("A", "B")
+}
+
+write.xlsx(
+  list(
+    "foodweb metrics" = foodweb_sheet,
+    "community richness" = richness_sheet,
+    "community diversity" = diversity_sheet
+  ),
+  "Result_Tables/ANOVA_TukeyHSD Results.xlsx"
+)
