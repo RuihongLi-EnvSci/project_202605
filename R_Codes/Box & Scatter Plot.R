@@ -80,9 +80,7 @@ for (current_index in levels(data_long$index)) {
   f_value <- anova_res$`F value`[1]
   f_value_text <- sprintf("F = %.2f", f_value)
   
-  p_label <- if (is.na(p_value)) {
-    "p = NA"
-  } else if (p_value < 0.001) {
+  p_label <- if (p_value < 0.001) {
     "P < 0.001"
   } else if (p_value < 0.01) {
     "P < 0.01"
@@ -218,13 +216,10 @@ for (current_index in levels(data_long$index)) {
   
   tukey_years_all <- rownames(tukey_groups)
   tukey_letters_all <- as.character(tukey_groups$groups)
-  valid_t <- !is.na(tukey_letters_all)
-  tukey_years <- tukey_years_all[valid_t]
-  tukey_letters <- tukey_letters_all[valid_t]
   
   entry <- data.frame(
-    A = c(index_names[current_index], "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", tukey_years, ""),
-    B = c("", "", "", "", "", "", "groups", tukey_letters, ""),
+    A = c(index_names[current_index], "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", tukey_years_all, ""),
+    B = c("", "", "", "", "", "", "groups", tukey_letters_all, ""),
     stringsAsFactors = FALSE
   )
   foodweb_sheet_rows[[current_index]] <- entry
@@ -237,16 +232,7 @@ if (length(foodweb_sheet_rows) > 0) {
   foodweb_sheet <- data.frame(A = character(), B = character(), stringsAsFactors = FALSE)
 }
 
-write.xlsx(
-  list("foodweb metrics" = foodweb_sheet),
-  "Result_Tables/ANOVA_TukeyHSD Results.xlsx",
-  overwrite = TRUE,
-  colNames = FALSE
-)
-
 ### Scatter Plot
-
-rm(list = ls())
 
 library(openxlsx)
 library(agricolae)
@@ -439,55 +425,23 @@ plot_point_style <- function(data_long,
     drop_na(value) %>%
     mutate(year = factor(as.character(year), levels = all_years))
   
-  if (nrow(species_data) == 0) {
-    return(NULL)
-  }
-  
   base_color <- species_base_colors[[as.character(current_species)]]
-  if (is.null(base_color) || is.na(base_color)) {
-    base_color <- "#4C78A8"
-  }
   
   year_colors <- generate_year_gradient(base_color, years = all_years)
-  
-  years_present <- species_data %>%
-    filter(!is.na(value)) %>%
-    pull(year) %>%
-    as.character() %>%
-    unique()
-  
-  n_years_present <- length(years_present)
   
   y_breaks <- y_breaks_list[[as.character(current_species)]]
   
   data_min <- min(species_data$value, na.rm = TRUE)
   data_max <- max(species_data$value, na.rm = TRUE)
   
-  manual_limits <- NULL
-  if (!is.null(y_limits_list)) {
-    manual_limits <- y_limits_list[[as.character(current_species)]]
-  }
+  manual_limits <- y_limits_list[[as.character(current_species)]]
   
-  if (!is.null(manual_limits) && length(manual_limits) == 2 && all(!is.na(manual_limits))) {
-    base_y_min <- manual_limits[1]
-    base_y_max <- manual_limits[2]
-  } else {
-    y_min_break <- min(y_breaks, na.rm = TRUE)
-    y_max_break <- max(y_breaks, na.rm = TRUE)
-    base_y_min <- min(data_min, y_min_break, na.rm = TRUE)
-    base_y_max <- max(data_max, y_max_break, na.rm = TRUE)
-  }
+  base_y_min <- manual_limits[1]
+  base_y_max <- manual_limits[2]
   
   y_range <- base_y_max - base_y_min
-  if (is.na(y_range) || y_range == 0) {
-    y_range <- 1
-  }
   
-  if (!is.null(manual_limits) && length(manual_limits) == 2 && all(!is.na(manual_limits))) {
-    final_y_max <- manual_limits[2]
-  } else {
-    final_y_max <- base_y_max + y_range * 0.08
-  }
+  final_y_max <- manual_limits[2]
   
   y_limits <- c(base_y_min, final_y_max)
   
@@ -501,82 +455,52 @@ plot_point_style <- function(data_long,
   
   species_label <- gsub(suffix_to_remove, "", as.character(current_species))
   
-  entry_df <- NULL
+  lm_model <- lm(value ~ year, data = species_data)
+  anova_res <- anova(lm_model)
   
-  if (n_years_present >= 2) {
-    result <- try({
-      lm_model <- lm(value ~ year, data = species_data)
-      anova_res <- anova(lm_model)
-      
-      p_value <- anova_res$`Pr(>F)`[1]
-      f_value <- anova_res$`F value`[1]
-      f_value_text <- sprintf("F = %.2f", f_value)
-      
-      p_label <- if (is.na(p_value)) {
-        "p = NA"
-      } else if (p_value < 0.001) {
-        "P < 0.001"
-      } else if (p_value < 0.01) {
-        "P < 0.01"
-      } else if (p_value < 0.05) {
-        "P < 0.05"
-      } else {
-        paste0("P = ", sprintf("%.3f", p_value))
-      }
-      
-      anova_text <- paste(f_value_text, "", p_label)
-      
-      anova_model <- aov(value ~ year, data = species_data)
-      tukey_res <- agricolae::HSD.test(
-        anova_model,
-        "year",
-        group = TRUE,
-        console = FALSE
-      )
-      
-      letter_df <- tukey_res$groups
-      letter_df$year <- rownames(letter_df)
-      rownames(letter_df) <- NULL
-      
-      letter_df <- letter_df %>%
-        mutate(year = factor(year, levels = all_years)) %>%
-        arrange(year)
-      
-      cat("\n", species_label)
-      cat("\n\n", "ANOVA Result", "\n")
-      cat(anova_text, "\n\n")
-      cat("Tukey HSD Result", "\n\n")
-      print(letter_df[, c("year", "groups")])
-      
-      data.frame(
-        A = c(species_label, "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", as.character(letter_df$year), ""),
-        B = c("", "", "", "", "", "", "groups", as.character(letter_df$groups), ""),
-        stringsAsFactors = FALSE
-      )
-    }, silent = TRUE)
-    
-    if (inherits(result, "try-error")) {
-      cat("\n", species_label)
-      cat("\n\n", "ANOVA Result", "\n")
-      cat("ANOVA unavailable for:", species_label, "\n")
-      entry_df <- data.frame(
-        A = c(species_label, "", "ANOVA Result", paste("ANOVA unavailable for:", species_label)),
-        B = c("", "", "", ""),
-        stringsAsFactors = FALSE
-      )
-    } else {
-      entry_df <- result
-    }
+  p_value <- anova_res$`Pr(>F)`[1]
+  f_value <- anova_res$`F value`[1]
+  f_value_text <- sprintf("F = %.2f", f_value)
+  
+  p_label <- if (p_value < 0.001) {
+    "P < 0.001"
+  } else if (p_value < 0.01) {
+    "P < 0.01"
+  } else if (p_value < 0.05) {
+    "P < 0.05"
   } else {
-    cat("\n", species_label)
-    cat("\n\n", "ANOVA Result", "\n")
-    cat("Insufficient years for ANOVA\n")
-    entry_df <- data.frame(
-      A = c(species_label, "", "ANOVA Result", "Insufficient years for ANOVA"),
-      B = c("", "", "", ""),
-      stringsAsFactors = FALSE
-    )
+    paste0("P = ", sprintf("%.3f", p_value))
   }
+  
+  anova_text <- paste(f_value_text, "", p_label)
+  
+  anova_model <- aov(value ~ year, data = species_data)
+  tukey_res <- agricolae::HSD.test(
+    anova_model,
+    "year",
+    group = TRUE,
+    console = FALSE
+  )
+  
+  letter_df <- tukey_res$groups
+  letter_df$year <- rownames(letter_df)
+  rownames(letter_df) <- NULL
+  
+  letter_df <- letter_df %>%
+    mutate(year = factor(year, levels = all_years)) %>%
+    arrange(year)
+  
+  cat("\n", species_label)
+  cat("\n\n", "ANOVA Result", "\n")
+  cat(anova_text, "\n\n")
+  cat("Tukey HSD Result", "\n\n")
+  print(letter_df[, c("year", "groups")])
+  
+  entry_df <- data.frame(
+    A = c(species_label, "", "ANOVA Result", anova_text, "", "Tukey HSD Result", "year", as.character(letter_df$year), ""),
+    B = c("", "", "", "", "", "", "groups", as.character(letter_df$groups), ""),
+    stringsAsFactors = FALSE
+  )
   
   p <- ggplot(species_data, aes(x = year, y = value, color = year)) +
     geom_point(
@@ -648,9 +572,7 @@ for (current_species in species_list_richness) {
     file_prefix = "richness_",
     suffix_to_remove = "_richness"
   )
-  if (!is.null(entry)) {
-    richness_sheet_rows[[current_species]] <- entry
-  }
+  richness_sheet_rows[[current_species]] <- entry
 }
 
 if (length(richness_sheet_rows) > 0) {
@@ -672,9 +594,7 @@ for (current_species in species_list_diversity) {
     file_prefix = "diversity_",
     suffix_to_remove = "_diversity"
   )
-  if (!is.null(entry)) {
-    diversity_sheet_rows[[current_species]] <- entry
-  }
+  diversity_sheet_rows[[current_species]] <- entry
 }
 
 if (length(diversity_sheet_rows) > 0) {
@@ -682,19 +602,6 @@ if (length(diversity_sheet_rows) > 0) {
   rownames(diversity_sheet) <- NULL
 } else {
   diversity_sheet <- data.frame(A = character(), B = character(), stringsAsFactors = FALSE)
-}
-
-foodweb_sheet <- read.xlsx(
-  xlsx_path,
-  sheet = "foodweb metrics",
-  colNames = FALSE
-)
-if (ncol(foodweb_sheet) >= 2) {
-  foodweb_sheet <- foodweb_sheet[, 1:2]
-  names(foodweb_sheet) <- c("A", "B")
-} else if (ncol(foodweb_sheet) == 1) {
-  foodweb_sheet$B <- NA_character_
-  names(foodweb_sheet) <- c("A", "B")
 }
 
 write.xlsx(
